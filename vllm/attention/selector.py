@@ -21,6 +21,7 @@ class _Backend(enum.Enum):
     FLASHINFER = enum.auto()
     PALLAS = enum.auto()
     IPEX = enum.auto()
+    SEQ_ATTN = enum.auto()
 
 
 @lru_cache(maxsize=None)
@@ -86,6 +87,10 @@ def get_attn_backend(
         logger.info("Using Pallas backend.")
         from vllm.attention.backends.pallas import PallasAttentionBackend
         return PallasAttentionBackend
+    elif backend == _Backend.SEQ_ATTN:
+        logger.info("Using SeqAttn backend.")
+        from vllm.attention.backends.seq_attn import SeqAttnBackend
+        return SeqAttnBackend
     else:
         raise ValueError("Invalid attention backend.")
 
