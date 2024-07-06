@@ -55,6 +55,9 @@ class SeqAttnImpl(AttentionImpl[AttentionMetadata]):
         self.alibi_slopes = alibi_slopes
         self.sliding_window = sliding_window
         self.kv_cache_dtype = kv_cache_dtype
+        assert alibi_slopes is None, "Alibi Slopes not supported for SeqAttn"
+        assert sliding_window is None, "Sliding Window not supported for SeqAttn"
+        assert blocksparse_params is None, "Blocksparse not supported for SeqAttn"
 
     def forward(
         self,
@@ -69,18 +72,18 @@ class SeqAttnImpl(AttentionImpl[AttentionMetadata]):
         # key: torch.tensor [Sum(SeqLens), NumHeads * HeadSize]
         # value: [Sum(SeqLens), NumHeads * HeadSize]
         # kv_cache: Tuple[[2, MaxSeqLen_i, NumHeads, HeadSize], ...]
-        
+        assert kv_scale == 1.0, "KV Scale not supported for SeqAttn"
         # Split the query, key, and value into the individual sequences
+        # print('attn metadata', attn_metadata)
         accum_seq_len = 0
         outputs = []
         for cache, past_seq_len, seq_len in zip(kv_cache, attn_metadata.past_seq_lens, attn_metadata.seq_lens):  
-            q = query[accum_seq_len:accum_seq_len + seq_len]
+            q = query[accum_seq_len:accum_seq_len + seq_len].view(1, seq_len, self.num_heads, self.head_size)
             cache[0][past_seq_len:past_seq_len + seq_len] = key[accum_seq_len:accum_seq_len + seq_len]
             cache[1][past_seq_len:past_seq_len + seq_len] = value[accum_seq_len:accum_seq_len + seq_len]
             accum_seq_len += seq_len
-            k = cache[0][past_seq_len:past_seq_len + seq_len].view(1, seq_len, self.num_heads, self.head_size)
-            v = cache[1][past_seq_len:past_seq_len + seq_len].view(1, seq_len, self.num_heads, self.head_size)
-            output = xops.memory_efficient_attention(q, k, v, scale = self.scale)
-            outputs.append(output)
+            k = cache[0][:past_seq_len + seq_len].view(1, seq_len + past_seq_len, self.num_heads, self.head_size)
+            v = cache[1][:past_seq_len + seq_len].view(1, seq_len + past_seq_len, self.num_heads, self.head_size)
+            output = xops.memory_efficient_attention_forward(q, k, v, scale = self.scale, attn_bias=xops.fmha.attn_bias.LowerTriangularFromBottomRightMask())
+            outputs.append(output.view(seq_len, -1))
         return torch.cat(outputs, dim=0)
-            
